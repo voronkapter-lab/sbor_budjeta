@@ -126,13 +126,32 @@ def add_issue(logs, level, filename, project_id, sheet, cell, subject,
 
 
 def is_full_person_name(value):
+    """True only for a plain three-part personal name, not roles or notes."""
     if not isinstance(value, str):
         return False
-    text = re.sub(r"\s+", " ", value.strip())
-    if not text or "вакансия" in text.casefold():
+    text = re.sub(r"\\s+", " ", value.strip())
+    if not text:
         return False
-    words = re.findall(r"[А-Яа-яЁёA-Za-z-]+", text)
-    return len(words) >= 3
+
+    # Notes, dates, brackets, vacancy labels and explanatory suffixes are not FIO.
+    if re.search(r"[()\\[\\]{}0-9*/]", text):
+        return False
+
+    words = text.split(" ")
+    if len(words) != 3:
+        return False
+
+    role_words = {
+        "лаборант", "лаборанта", "лаборанты", "техник", "инженер",
+        "ассистент", "специалист", "руководитель", "менеджер",
+        "стажер", "стажёр", "вакансия", "вакантно", "должность",
+        "уборщик", "оператор", "координатор", "администратор",
+    }
+    if any(word.casefold().strip(".,;:") in role_words for word in words):
+        return False
+
+    # Each component must be a name-like alphabetic token (hyphenated names allowed).
+    return all(re.fullmatch(r"[А-Яа-яЁёA-Za-z]+(?:-[А-Яа-яЁёA-Za-z]+)*", word) for word in words)
 
 
 def has_user_data(values):
@@ -357,11 +376,6 @@ def read_project(upload, logs):
                       f"G{row_num}", subject, "Исходная сумма не совпадает с ценой × количеством.",
                       source_sum, calculated_sum,
                       "В итог записана пересчитанная сумма.")
-
-        if clean(values[8]) is None:
-            add_issue(logs, "Предупреждение", filename, project_id, PURCHASE_SHEET,
-                      f"I{row_num}", subject, "Не заполнен желательный ФЛС.",
-                      None, None, "Проверить необходимость указания ФЛС.")
 
         project_name_id = (
             f"{project_id} {project['project_name'] or ''}".strip()
