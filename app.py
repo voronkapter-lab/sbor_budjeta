@@ -465,11 +465,88 @@ def build_output(projects, logs):
                       name, "Суммарная доля рабочего времени по проектам превышает 1.",
                       total, total, "Уточнить распределение занятости сотрудника.")
 
+    # Корректировка титула: полученные внутренние заказы уменьшают
+    # бюджет закупок и расходники проекта-исполнителя.
+    # Учитываем только категорию «Внутренние услуги» и заполненный столбец C.
+    project_by_id = {
+        str(project["project_id"]).strip().upper(): project
+        for project in projects
+        if project.get("project_id") is not None and str(project["project_id"]).strip()
+    }
+    received_internal_by_id = defaultdict(float)
+
+    for project in projects:
+        for purchase in project["purchases"]:
+            category = clean(purchase[1])
+            executor = clean(purchase[2])
+            amount = to_number(purchase[6])
+
+            if category != "Внутренние услуги" or executor is None or amount is None:
+                continue
+
+            executor_text = str(executor).strip()
+            executor_id = executor_text[:6].upper()
+
+            if not re.fullmatch(r"[A-ZА-ЯЁ0-9]{6}", executor_id):
+                add_issue(
+                    logs, "Предупреждение", project["filename"], project["project_id"],
+                    PURCHASE_SHEET, "C", purchase[3] or "Внутренние услуги",
+                    "Не удалось определить ID проекта-исполнителя по первым 6 символам.",
+                    executor, amount,
+                    "Проверить значение исполнителя в столбце C. Строка не включена в корректировку."
+                )
+                continue
+
+            if executor_id not in project_by_id:
+                add_issue(
+                    logs, "Предупреждение", project["filename"], project["project_id"],
+                    PURCHASE_SHEET, "C", purchase[3] or "Внутренние услуги",
+                    "Проект-исполнитель не найден среди загруженных проектов.",
+                    executor, amount,
+                    "Загрузить книгу проекта-исполнителя или проверить ID. Сумма не включена в корректировку."
+                )
+                continue
+
+            received_internal_by_id[executor_id] += amount
+
+    corrected_title_rows = []
+    for project, ordinary_row in zip(projects, title_rows):
+        project_id = project.get("project_id")
+        project_key = str(project_id).strip().upper() if project_id is not None else ""
+        received = received_internal_by_id.get(project_key, 0.0)
+
+        corrected_row = list(ordinary_row)
+        # H — бюджет закупок; N — расходники.
+        corrected_row[7] = (to_number(corrected_row[7]) or 0.0) - received
+        corrected_row[13] = (to_number(corrected_row[13]) or 0.0) - received
+        corrected_title_rows.append(corrected_row)
+
+        if received:
+            if corrected_row[13] < 0:
+                add_issue(
+                    logs, "Предупреждение", project["filename"], project_id,
+                    "Титул с корректировкой", "N",
+                    project.get("project_name") or project_id,
+                    "Полученные внутренние заказы превышают бюджет расходников.",
+                    received, corrected_row[13],
+                    "Отрицательное значение сохранено по согласованному правилу; проверить план расходников."
+                )
+            if corrected_row[7] < 0:
+                add_issue(
+                    logs, "Предупреждение", project["filename"], project_id,
+                    "Титул с корректировкой", "H",
+                    project.get("project_name") or project_id,
+                    "После вычитания внутренних заказов бюджет закупок стал отрицательным.",
+                    received, corrected_row[7],
+                    "Отрицательное значение сохранено по согласованному правилу; проверить бюджет проекта."
+                )
+
     output = Workbook()
     output.remove(output.active)
 
     sheets = [
         ("Титульные", TITLE_HEADERS, title_rows),
+        ("Титул с корректировкой", TITLE_HEADERS, corrected_title_rows),
         ("Команда", TEAM_HEADERS, team_rows),
         ("Закупки", PURCHASE_HEADERS, purchase_rows),
         ("Журнал ошибок", LOG_HEADERS, logs),
