@@ -29,6 +29,19 @@ uploaded_files = st.file_uploader(
     help="В каждом файле должны быть листы «Титульная», «Команда» и «Закупки»."
 )
 
+selected_count = len(uploaded_files) if uploaded_files else 0
+if selected_count:
+    st.success(f"Выбрано файлов: {selected_count}")
+else:
+    st.warning("Сначала выберите один или несколько файлов .xlsx.")
+
+build_clicked = st.button(
+    "▶ Собрать бюджет",
+    type="primary",
+    use_container_width=True,
+    disabled=(selected_count == 0),
+)
+
 TITLE_SHEET = "Титульная"
 TEAM_SHEET = "Команда"
 PURCHASE_SHEET = "Закупки"
@@ -113,16 +126,3 @@ def add_issue(logs, level, filename, project_id, sheet, cell, subject,
 
 
 def is_full_person_name(value):
-    if not isinstance(value, str):
-        return False
-    text = re.sub(r"\s+", " ", value.strip())
-    if not text or "вакансия" in text.casefold():
-        return False
-    words = re.findall(r"[А-Яа-яЁёA-Za-z-]+", text)
-    return len(words) >= 3
-
-
-def has_user_data(values):
-    for value in values:
-        if isinstance(value, str) and value.startswith("="):
-            continue
