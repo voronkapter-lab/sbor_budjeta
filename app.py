@@ -124,5 +124,5 @@ def read_project(uploaded_file, logs):
         expected = TITLE_LABELS[i-1]
         actual = clean(tws.cell(row=i, column=1).value)
         if actual != expected:
-            add_log(logs, "Предупреждение", filename, project_id, TITLE_SHEET, f"A{i}",
-                    "Название показателя", f"Ожидалось «{expected}», обнаружено «{actual or 'пусто'}». Значение всё равно взято из B{i}.",
+            actual_label = actual if actual is not None else "пусто"
+            description = (
