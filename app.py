@@ -3,13 +3,14 @@ import math
 import re
 from collections import defaultdict
 
-import pandas as pd
 import streamlit as st
 from openpyxl import Workbook, load_workbook
 from openpyxl.styles import Font, PatternFill, Alignment
 from openpyxl.utils import get_column_letter
 
 st.set_page_config(page_title="Сборка бюджета", page_icon="📊", layout="wide")
+st.title("📊 Сборка бюджета")
+st.caption("Приложение запущено. Подготовка интерфейса…")
 
 TITLE_SHEET = "Титульная"
 TEAM_SHEET = "Команда"
@@ -125,4 +126,3 @@ def read_project(uploaded_file, logs):
         if actual != expected:
             add_log(logs, "Предупреждение", filename, project_id, TITLE_SHEET, f"A{i}",
                     "Название показателя", f"Ожидалось «{expected}», обнаружено «{actual or 'пусто'}». Значение всё равно взято из B{i}.",
-                    actual, value, "Проверить, не изменился ли смысл строки.")
