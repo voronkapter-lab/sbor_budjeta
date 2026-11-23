@@ -125,4 +125,4 @@ def read_project(uploaded_file, logs):
         actual = clean(tws.cell(row=i, column=1).value)
         if actual != expected:
             actual_label = actual if actual is not None else "пусто"
-            description = (
+            description = "Ожидалось «" + str(expected) + "», обнаружено «" + str(actual_label) + "». Значение всё равно взято из B" + str(i) + "."
