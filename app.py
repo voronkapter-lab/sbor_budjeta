@@ -1,16 +1,33 @@
 import io
 import math
 import re
+import traceback
 from collections import defaultdict
 
+import pandas as pd
 import streamlit as st
 from openpyxl import Workbook, load_workbook
 from openpyxl.styles import Font, PatternFill, Alignment
 from openpyxl.utils import get_column_letter
 
+
+# -------------------- НАСТРОЙКИ --------------------
 st.set_page_config(page_title="Сборка бюджета", page_icon="📊", layout="wide")
+
 st.title("📊 Сборка бюджета")
-st.caption("Приложение запущено. Подготовка интерфейса…")
+st.caption("Загрузка исходников → проверка → сборка единого Excel.")
+st.info(
+    "Файл формируется даже при наличии ошибок. Проблемы и предупреждения "
+    "попадут на отдельную вкладку «Журнал ошибок»."
+)
+
+# Загрузчик показывается сразу, до объявления обработчиков.
+uploaded_files = st.file_uploader(
+    "Загрузите Excel-файлы проектов",
+    type=["xlsx"],
+    accept_multiple_files=True,
+    help="В каждом файле должны быть листы «Титульная», «Команда» и «Закупки»."
+)
 
 TITLE_SHEET = "Титульная"
 TEAM_SHEET = "Команда"
@@ -59,70 +76,53 @@ KNOWN_CATEGORIES = {
     "Расходники", "Оборудование", "Магазинчик", "Услуги",
     "Внутренние услуги", "Командировки", "Публикации",
 }
-EXCLUDED_FROM_PURCHASE_BUDGET = {
-    "ФОТ", "Внутренние услуги", "Магазинчик"
-}
 
-def clean(v):
-    if v is None:
+
+# -------------------- ОБЩИЕ ФУНКЦИИ --------------------
+def clean(value):
+    if value is None:
         return None
-    if isinstance(v, str):
-        s = v.strip()
-        return s if s else None
-    return v
+    if isinstance(value, str):
+        value = value.strip()
+        return value if value else None
+    return value
 
-def is_number(v):
-    return isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v)
 
-def num(v):
-    if is_number(v):
-        return float(v)
-    if isinstance(v, str):
-        s = v.strip().replace(" ", "").replace(",", ".")
+def to_number(value):
+    if isinstance(value, bool) or value is None:
+        return None
+    if isinstance(value, (int, float)):
+        return float(value) if math.isfinite(value) else None
+    if isinstance(value, str):
+        text = value.strip().replace(" ", "").replace(",", ".")
         try:
-            return float(s)
-        except Exception:
+            result = float(text)
+            return result if math.isfinite(result) else None
+        except ValueError:
             return None
     return None
 
-def add_log(logs, level, filename, project_id, sheet, cell, subject, check, description, original=None, calculated=None, recommendation="Проверить исходный файл."):
+
+def add_issue(logs, level, filename, project_id, sheet, cell, subject,
+              check, description, original=None, calculated=None,
+              recommendation="Проверить исходный файл."):
     logs.append([
         level, filename, project_id, sheet, cell, subject, check,
         description, original, calculated, recommendation
     ])
 
-def is_formula_only_row(values):
-    meaningful = []
-    for v in values:
-        if isinstance(v, str) and v.startswith("="):
+
+def is_full_person_name(value):
+    if not isinstance(value, str):
+        return False
+    text = re.sub(r"\s+", " ", value.strip())
+    if not text or "вакансия" in text.casefold():
+        return False
+    words = re.findall(r"[А-Яа-яЁёA-Za-z-]+", text)
+    return len(words) >= 3
+
+
+def has_user_data(values):
+    for value in values:
+        if isinstance(value, str) and value.startswith("="):
             continue
-        if clean(v) is not None:
-            meaningful.append(v)
-    return not meaningful
-
-def read_project(uploaded_file, logs):
-    filename = uploaded_file.name
-    raw = uploaded_file.getvalue()
-    try:
-        wb = load_workbook(io.BytesIO(raw), data_only=False)
-    except Exception as e:
-        add_log(logs, "Ошибка", filename, None, "-", "-", "Чтение файла",
-                "Файл Excel не прочитан", str(e), recommendation="Пересохранить файл в формате .xlsx.")
-        return None
-
-    for required in (TITLE_SHEET, TEAM_SHEET, PURCHASE_SHEET):
-        if required not in wb.sheetnames:
-            add_log(logs, "Ошибка", filename, None, required, "-", "Наличие листа",
-                    f"Не найден обязательный лист «{required}».")
-    if not all(s in wb.sheetnames for s in (TITLE_SHEET, TEAM_SHEET, PURCHASE_SHEET)):
-        return None
-
-    tws = wb[TITLE_SHEET]
-    title_values = [clean(tws.cell(row=i, column=2).value) for i in range(1, 8)]
-    project_id = title_values[0]
-    for i, value in enumerate(title_values, start=1):
-        expected = TITLE_LABELS[i-1]
-        actual = clean(tws.cell(row=i, column=1).value)
-        if actual != expected:
-            actual_label = actual if actual is not None else "пусто"
-            description = "Ожидалось «" + str(expected) + "», обнаружено «" + str(actual_label) + "». Значение всё равно взято из B" + str(i) + "."
